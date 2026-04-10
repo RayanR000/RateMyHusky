@@ -50,7 +50,7 @@ const Course = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, [code]);
+	}, [code, user]);
 
 	useEffect(() => {
 		const handler = () => setShowBackToTop(window.scrollY > 300);
@@ -78,21 +78,13 @@ const Course = () => {
 	const recentInstructors = useMemo(() => {
 		if (!course) return [];
 		const currentYear = new Date().getFullYear();
-		const instructorLatestTermId = new Map<string, number>();
 
 		const getInstructorsWithinYears = (yearsBack: number) => {
 			const cutoffYear = currentYear - yearsBack;
-			const recentNames = new Set<string>();
-			for (const section of course.sections) {
-				const yearMatch = section.termTitle.match(/\b(20\d{2})\b/);
-				if (yearMatch && parseInt(yearMatch[1]) >= cutoffYear) {
-					recentNames.add(section.instructor);
-					const prev = instructorLatestTermId.get(section.instructor) ?? 0;
-					const cur = termSortKey(section.termTitle);
-					if (cur > prev) instructorLatestTermId.set(section.instructor, cur);
-				}
-			}
-			return course.instructors.filter(inst => recentNames.has(inst.name));
+			return course.instructors.filter(inst => {
+				const yearMatch = (inst.latestTermTitle || '').match(/\b(20\d{2})\b/);
+				return yearMatch && parseInt(yearMatch[1]) >= cutoffYear;
+			});
 		};
 
 		// Start with 1 year, expand until at least 5 or no more data
@@ -104,13 +96,18 @@ const Course = () => {
 			result = getInstructorsWithinYears(yearsBack);
 		}
 
+		// If no recency data available, fall back to all instructors sorted by rating
+		if (!result.length) {
+			return [...course.instructors]
+				.sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))
+				.slice(0, 10);
+		}
+
 		const sorted = result.sort((a, b) => {
-			const aTermId = instructorLatestTermId.get(a.name) ?? 0;
-			const bTermId = instructorLatestTermId.get(b.name) ?? 0;
-			if (bTermId !== aTermId) return bTermId - aTermId;
-			const aRating = a.avgRating ?? -1;
-			const bRating = b.avgRating ?? -1;
-			return bRating - aRating;
+			const aTermSort = termSortKey(a.latestTermTitle || '');
+			const bTermSort = termSortKey(b.latestTermTitle || '');
+			if (bTermSort !== aTermSort) return bTermSort - aTermSort;
+			return (b.avgRating ?? -1) - (a.avgRating ?? -1);
 		});
 
 		if (sorted.length > 10) {
@@ -123,9 +120,9 @@ const Course = () => {
 
 	const avgDifficulty = useMemo(() => {
 		if (!course) return null;
-		const valid = course.instructors.filter(i => i.difficulty != null);
+		const valid = course.instructors.filter(i => i.courseAvgDifficulty != null);
 		if (!valid.length) return null;
-		return valid.reduce((sum, i) => sum + i.difficulty!, 0) / valid.length;
+		return valid.reduce((sum, i) => sum + i.courseAvgDifficulty!, 0) / valid.length;
 	}, [course]);
 
 	const avgHoursPerWeek = useMemo(() => {
@@ -178,8 +175,8 @@ const Course = () => {
 					<RatingStatCard avgRating={summary.avgRating} />
 					<DifficultyStatCard value={avgDifficulty} />
 					<StatCard label="Avg Hrs / Week" value={avgHoursPerWeek != null ? `${avgHoursPerWeek.toFixed(1)}h` : '—'} />
-					<StatCard label="Instructors" value={summary.totalInstructors.toLocaleString()} />
-					<StatCard label="Avg Enrollment" value={summary.totalSections > 0 ? Math.round(summary.totalEnrollment / summary.totalSections).toLocaleString() : '—'} />
+					<StatCard label="Instructors" value={course.instructors.length.toLocaleString()} />
+					<StatCard label="Avg Enrollment" value={summary.avgEnrollment != null ? summary.avgEnrollment.toLocaleString() : '—'} />
 					<StatCard label="Last Taught" value={summary.latestTermTitle || 'Unknown'} className="course-stat-last-taught" />
 				</section>
 

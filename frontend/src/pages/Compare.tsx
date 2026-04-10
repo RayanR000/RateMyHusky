@@ -77,28 +77,22 @@ const pickWinner = (
 const cleanTermTitle = (t: string): string => t.replace(/^\d{6}:\s*/, '').replace(/\s*\d{6}/g, '').trim();
 
 const getRecentTraceSnapshot = (profile: ProfessorProfile | null): TraceSnapshot | null => {
-	if (!profile?.traceCourses?.length) return null;
+	if (!profile?.traceCourses?.length || profile.traceRating == null) return null;
 
-	const sortedCourses = [...profile.traceCourses].sort((a, b) => {
+	const mostRecent = [...profile.traceCourses].sort((a, b) => {
 		const ka = termSortKey(a.termTitle);
 		const kb = termSortKey(b.termTitle);
 		if (ka !== kb) return kb - ka;
 		return b.courseId - a.courseId;
-	});
+	})[0];
 
-	for (const course of sortedCourses) {
-		const overallScore = course.scores.find((score) => /overall/i.test(score.question));
-		if (overallScore && typeof overallScore.mean === 'number') {
-			return {
-				term: cleanTermTitle(course.termTitle),
-				course: course.displayName,
-				score: overallScore.mean,
-			};
-		}
-	}
-
-	return null;
+	return {
+		term: cleanTermTitle(mostRecent.termTitle),
+		course: mostRecent.displayName,
+		score: profile.traceRating,
+	};
 };
+
 
 function Compare() {
 	const [searchParams, setSearchParams] = useSearchParams();
@@ -193,18 +187,26 @@ function Compare() {
 	}, [rightSlug, rightCatalogProfessor]);
 
 	useEffect(() => {
-		setLeftQuery(leftCatalogProfessor?.name ?? '');
+		if (!leftSlug) {
+			setLeftQuery('');
+		} else if (leftCatalogProfessor?.name) {
+			setLeftQuery(leftCatalogProfessor.name);
+		}
 		setLeftSuggestions([]);
 		setShowLeftSuggestions(false);
 		setLeftActiveIndex(-1);
-	}, [leftCatalogProfessor?.name]);
+	}, [leftSlug, leftCatalogProfessor?.name]);
 
 	useEffect(() => {
-		setRightQuery(rightCatalogProfessor?.name ?? '');
+		if (!rightSlug) {
+			setRightQuery('');
+		} else if (rightCatalogProfessor?.name) {
+			setRightQuery(rightCatalogProfessor.name);
+		}
 		setRightSuggestions([]);
 		setShowRightSuggestions(false);
 		setRightActiveIndex(-1);
-	}, [rightCatalogProfessor?.name]);
+	}, [rightSlug, rightCatalogProfessor?.name]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -232,7 +234,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [leftSlug]);
+	}, [leftSlug, user]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -260,7 +262,7 @@ function Compare() {
 		return () => {
 			cancelled = true;
 		};
-	}, [rightSlug]);
+	}, [rightSlug, user]);
 
 	const updateSlugs = (updates: { a?: string; b?: string }) => {
 		const next = new URLSearchParams(searchParams);
@@ -292,8 +294,20 @@ function Compare() {
 	};
 
 	const handleClear = (side: Side) => {
-		if (side === 'a') updateSlugs({ a: '' });
-		else updateSlugs({ b: '' });
+		if (side === 'a') {
+			setLeftQuery('');
+			setLeftSuggestions([]);
+			setShowLeftSuggestions(false);
+			setLeftActiveIndex(-1);
+			updateSlugs({ a: '' });
+			return;
+		}
+
+		setRightQuery('');
+		setRightSuggestions([]);
+		setShowRightSuggestions(false);
+		setRightActiveIndex(-1);
+		updateSlugs({ b: '' });
 	};
 
 	const getSlugForSuggestion = (name: string) => {

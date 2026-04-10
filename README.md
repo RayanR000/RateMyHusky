@@ -1,5 +1,7 @@
 # RateMyHusky
 
+**https://ratemyhusky.com/**
+
 RateMyHusky is a full-stack web app for discovering, searching, and comparing Northeastern University professors.
 
 It combines:
@@ -10,12 +12,15 @@ It combines:
 ## Features
 
 - Professor catalog with filters for college, department, ratings, and review volume
-- Professor profile pages with RMP ratings, TRACE scores, comments, and related courses
+- Professor profile pages with RMP ratings, TRACE scores, rating history, comments, and related courses
+- Course catalog with filters and course detail pages showing sections, ratings, and linked professors
 - Side-by-side professor comparison view
+- GOATED professors leaderboard by college on the homepage
 - Search with autocomplete for professors and courses
-- Shuffle/random discovery experience
+- Shuffle wheel for random professor discovery
+- Breadcrumb navigation across pages
 - Google OAuth sign-in flow for gated functionality
-- Responsive UI with theme support
+- Dark mode toggle and responsive UI
 
 ## Tech Stack
 
@@ -26,6 +31,8 @@ It combines:
 | Auth | Google OAuth 2.0, JWT (PyJWT) |
 | Database | CockroachDB (via psycopg2) |
 | Data ingestion | CSV-based scraper outputs + migration scripts |
+| Frontend hosting | Vercel |
+| Backend hosting | Railway |
 
 ## Prerequisites
 
@@ -119,6 +126,7 @@ Additional notes:
 │       ├── components/
 │       ├── context/
 │       └── pages/
+│                             
 └── README.md
 ```
 

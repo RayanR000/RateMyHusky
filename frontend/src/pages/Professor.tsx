@@ -11,8 +11,8 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Legend, Tooltip as RechartsTooltip,
 } from 'recharts';
-import { fetchProfessorFull, fetchTraceDeptAvg } from '../api/api';
-import type { ProfessorProfile, ProfessorReview, TraceComment, TraceDeptAvgItem } from '../api/api';
+import { fetchProfessorFull } from '../api/api';
+import type { ProfessorProfile, ProfessorReview, TraceComment } from '../api/api';
 import { termSortKey } from '../utils/termUtils';
 import { useAuth } from '../context/AuthContext';
 import SignInModal from '../components/SignInModal';
@@ -236,8 +236,7 @@ const Professor = () => {
   const COURSES_COLLAPSED_LIMIT = 5;
   const MAX_VISIBLE_TERMS = 3;
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [deptAvg, setDeptAvg] = useState<TraceDeptAvgItem[]>([]);
-  const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
+const [showCourseTip, setShowCourseTip] = useState(() => localStorage.getItem('prof_course_tip_dismissed') !== '1');
 
   /* ── review pill ── */
   const updateReviewPill = useCallback(() => {
@@ -425,140 +424,12 @@ const Professor = () => {
     });
   }, [profile, selectedCourses]);
 
-  /* ── TRACE radar: most-recent-term aggregation ── */
-  const mostRecentTermData = useMemo(() => {
-    if (filteredTraceCourses.length === 0) return null;
-    // Sort unique term titles by proper chronological order (newest first)
-    const termTitles = [...new Set(filteredTraceCourses.map(c => c.termTitle))]
-      .sort((a, b) => termSortKey(b) - termSortKey(a));
-    // Pick the most recent term that actually has score data
-    for (const termTitle of termTitles) {
-      const termCourses = filteredTraceCourses.filter(c => c.termTitle === termTitle);
-      const scoreMap = new Map<string, { sum: number; weight: number; deptSum: number; deptWeight: number }>();
-      for (const course of termCourses) {
-        for (const s of course.scores) {
-          if (!scoreMap.has(s.question)) scoreMap.set(s.question, { sum: 0, weight: 0, deptSum: 0, deptWeight: 0 });
-          const w = (s.totalResponses != null ? s.totalResponses : s.completed) || 0;
-          if (w > 0) {
-            scoreMap.get(s.question)!.sum += s.mean * w;
-            scoreMap.get(s.question)!.weight += w;
-            if (s.deptMean != null) {
-              scoreMap.get(s.question)!.deptSum += s.deptMean * w;
-              scoreMap.get(s.question)!.deptWeight += w;
-            }
-          }
-        }
-      }
-      const scores: { question: string; mean: number; deptMean?: number }[] = [];
-      for (const [question, { sum, weight, deptSum, deptWeight }] of scoreMap.entries()) {
-        if (weight > 0) scores.push({ question, mean: sum / weight, deptMean: deptWeight > 0 ? deptSum / deptWeight : undefined });
-      }
-      if (scores.length > 0) {
-        return {
-          termId: termCourses[0].termId,
-          termTitle,
-          deptName: termCourses[0].departmentName || profile?.department || '',
-          scores,
-        };
-      }
-    }
-    return null;
-  }, [filteredTraceCourses, profile]);
-
-  // Fetch department averages whenever the most-recent-term context changes (auth-gated)
-  useEffect(() => {
-    if (!user || !mostRecentTermData?.deptName || !mostRecentTermData.termId) {
-      setDeptAvg([]);
-      return;
-    }
-    fetchTraceDeptAvg(mostRecentTermData.deptName, mostRecentTermData.termId)
-      .then(data => { setDeptAvg(data); })
-      .catch(() => setDeptAvg([]));
-  }, [user, mostRecentTermData?.deptName, mostRecentTermData?.termId]);
-
-  const RADAR_METRICS = useMemo(() => [
-    {
-      label: 'Teaching\nEffectiveness',
-      short: 'Teaching',
-      patterns: [
-        ['overall rating of teaching', 'overall rating', 'overall effectiveness', 'what is your overall rating'],
-        ['clearly communicated', 'clear communication', 'clearly'],
-      ],
-    },
-    {
-      label: 'Course\nOrganization',
-      short: 'Organization',
-      patterns: [
-        ['online course materials were organized', 'online course materials'],
-        ['syllabus was accurate', 'syllabus'],
-        ['used class time effectively', 'effective time'],
-      ],
-    },
-    {
-      label: 'Intellectual\nChallenge',
-      short: 'Rigor',
-      patterns: [
-        ['intellectually challenging', 'this course was intellectually', 'challenging'],
-        ['learned a lot', 'i learned a lot'],
-      ],
-    },
-    {
-      label: 'Grading &\nFeedback',
-      short: 'Grading',
-      patterns: [
-        ['fairly evaluated', 'fair evaluation', 'fair grades'],
-        ['sufficient feedback', 'provided sufficient feedback', 'feedback'],
-      ],
-    },
-    {
-      label: 'Accessibility\n& Support',
-      short: 'Accessibility',
-      patterns: [
-        ['available to assist students outside', 'outside assist'],
-        ['respectful and inclusive', 'facilitated a respectful', 'respect'],
-      ],
-    },
-  ], []);
-
-  const getMetricValue = useCallback(
-    (scores: { question: string; mean: number }[], patternGroups: string[][]): number | null => {
-      const values: number[] = [];
-      for (const group of patternGroups) {
-        const match = scores.find(s => {
-          const q = s.question.toLowerCase();
-          return group.some(p => q.includes(p));
-        });
-        if (match && match.mean > 0) values.push(match.mean);
-      }
-      return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
-    },
-    []
-  );
-
+  /* ── TRACE radar: precomputed by backend for most-recent term ── */
   const radarData = useMemo(() => {
-    if (!mostRecentTermData) return null;
-    const profScores = mostRecentTermData.scores;
-    // For newer terms (901+) dept_mean is stored per score row; for older terms use fetched deptAvg
-    const useDeptMeanFromScores = deptAvg.length === 0 && profScores.some(s => s.deptMean != null);
-    const deptScores = useDeptMeanFromScores
-      ? profScores.map(s => ({ question: s.question, mean: s.deptMean! }))
-      : deptAvg.map(d => ({ question: d.question, mean: d.avgMean }));
-    const hasDept = useDeptMeanFromScores || deptAvg.length > 0;
-    const points = RADAR_METRICS.map(m => {
-      const profVal = getMetricValue(profScores, m.patterns);
-      const deptVal = hasDept ? getMetricValue(deptScores, m.patterns) : null;
-      return {
-        metric: m.short,
-        // Use 0 for missing values so the polygon closes; tooltip will show "N/A"
-        professor: profVal !== null ? +profVal.toFixed(2) : 0,
-        department: deptVal !== null ? +deptVal.toFixed(2) : 0,
-        profMissing: profVal === null,
-        deptMissing: deptVal === null,
-      };
-    });
-    const hasData = points.some(p => !p.profMissing);
-    return hasData ? points : null;
-  }, [mostRecentTermData, deptAvg, RADAR_METRICS, getMetricValue]);
+    if (!profile?.radarData) return null;
+    const hasData = profile.radarData.some(p => !p.profMissing);
+    return hasData ? profile.radarData : null;
+  }, [profile?.radarData]);
 
   const radarDomainMin = useMemo(() => {
     if (!radarData) return 4;
@@ -575,29 +446,45 @@ const Professor = () => {
   const stats = useMemo(() => {
     if (!profile) return null;
 
+    const noneSelected = selectedCourses.size === 0;
     const allSelected = allCourseCodes.length > 0 && selectedCourses.size === allCourseCodes.length;
 
+    if (noneSelected) {
+      return {
+        avgRating: 0,
+        rmpRating: null,
+        traceRating: null,
+        difficulty: 0,
+        totalRatings: 0,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+        hoursPerWeek: null,
+      };
+    }
+
+    if (allSelected) {
+      const traceCompleted = profile.traceRatingCounts
+        ? Object.values(profile.traceRatingCounts).reduce((sum, rc) => sum + (rc.completed || 0), 0)
+        : 0;
+      return {
+        avgRating: profile.avgRating,
+        rmpRating: profile.rmpRating,
+        traceRating: profile.traceRating,
+        difficulty: profile.difficulty ?? 0,
+        totalRatings: profile.totalRatings + traceCompleted,
+        wouldTakeAgainPct: profile.wouldTakeAgainPct,
+        hoursPerWeek: profile.hoursPerWeek,
+      };
+    }
+
+    // Course-filtered: use RMP data for rating/difficulty; fall back to profile-level for TRACE values
     const rmpRating = filteredRmpReviews.length > 0
       ? filteredRmpReviews.reduce((acc, r) => acc + r.quality, 0) / filteredRmpReviews.length
       : null;
-    
-    let traceSum = 0, traceWeight = 0;
-    filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => {
-        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
-        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
-      });
-      if (overall) {
-        const weight = overall.totalResponses ?? overall.completed;
-        if (weight > 0) {
-          traceSum += overall.mean * weight;
-          traceWeight += weight;
-        }
-      }
-    });
+    const rmpDifficulty = filteredRmpReviews.length > 0
+      ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
+      : null;
 
-    const traceRating = traceWeight > 0 ? traceSum / traceWeight : null;
-
+    const traceRating = profile.traceRating;
     let avgRating = 0;
     if (rmpRating !== null && traceRating !== null) {
       avgRating = (rmpRating + traceRating) / 2;
@@ -607,33 +494,50 @@ const Professor = () => {
       avgRating = traceRating;
     }
 
-    if (allSelected) {
-      return {
-        avgRating: profile.avgRating,
-        rmpRating: profile.rmpRating,
-        traceRating: profile.traceRating,
-        difficulty: profile.difficulty ?? 0,
-        totalRatings: profile.totalRatings,
-        wouldTakeAgainPct: profile.wouldTakeAgainPct,
-        hoursPerWeek: profile.hoursPerWeek,
-      };
+    const coursesWithHours = filteredTraceCourses.filter(c => c.hoursPerWeek != null);
+    const filteredHoursPerWeek = coursesWithHours.length > 0
+      ? Math.round(coursesWithHours.reduce((acc, c) => acc + c.hoursPerWeek!, 0) / coursesWithHours.length * 10) / 10
+      : null;
+
+    let traceWeightedSum = 0, traceResponses = 0;
+    for (const c of filteredTraceCourses) {
+      if (c.challengeWeightedSum != null && c.challengeResponses != null) {
+        traceWeightedSum += c.challengeWeightedSum;
+        traceResponses += c.challengeResponses;
+      }
+    }
+    const traceDifficulty = traceResponses > 0 ? traceWeightedSum / traceResponses : null;
+
+    let difficulty: number;
+    if (rmpDifficulty !== null && traceDifficulty !== null) {
+      difficulty = (rmpDifficulty + traceDifficulty) / 2;
+    } else if (rmpDifficulty !== null) {
+      difficulty = rmpDifficulty;
+    } else if (traceDifficulty !== null) {
+      difficulty = traceDifficulty;
+    } else {
+      difficulty = profile.difficulty ?? 0;
     }
 
     return {
       avgRating,
       rmpRating,
       traceRating,
-      difficulty: filteredRmpReviews.length > 0
-        ? filteredRmpReviews.reduce((acc, r) => acc + r.difficulty, 0) / filteredRmpReviews.length
-        : 0,
-      totalRatings: filteredRmpReviews.length + traceWeight,
+      difficulty,
+      totalRatings: filteredRmpReviews.length + (profile.traceRatingCounts
+        ? Array.from(selectedCourses).reduce((sum, code) => sum + (profile.traceRatingCounts![code]?.completed || 0), 0)
+        : 0),
       wouldTakeAgainPct: profile.wouldTakeAgainPct,
-      hoursPerWeek: profile.hoursPerWeek,
+      hoursPerWeek: filteredHoursPerWeek,
     };
   }, [profile, filteredRmpReviews, filteredTraceCourses, allCourseCodes, selectedCourses]);
 
   const ratingDistribution = useMemo(() => {
     const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    if (selectedCourses.size === 0) {
+      return [5, 4, 3, 2, 1].map(star => ({ star, count: 0 }));
+    }
 
     // RMP
     filteredRmpReviews.forEach(r => {
@@ -643,26 +547,25 @@ const Professor = () => {
       }
     });
 
-    // TRACE
-    filteredTraceCourses.forEach(c => {
-      const overall = c.scores.find(s => {
-        const q = s.question.toLowerCase().replace(/\s+/g, ' ');
-        return q === 'overall rating of teaching' || q.includes('overall rating') || q.includes('overall');
-      });
-      if (overall) {
-        counts[1] += overall.count1 ?? 0;
-        counts[2] += overall.count2 ?? 0;
-        counts[3] += overall.count3 ?? 0;
-        counts[4] += overall.count4 ?? 0;
-        counts[5] += overall.count5 ?? 0;
+    // TRACE — use course-keyed rating counts, filtered by selected courses
+    if (profile?.traceRatingCounts) {
+      for (const code of selectedCourses) {
+        const rc = profile.traceRatingCounts[code];
+        if (rc) {
+          counts[1] += rc.count1;
+          counts[2] += rc.count2;
+          counts[3] += rc.count3;
+          counts[4] += rc.count4;
+          counts[5] += rc.count5;
+        }
       }
-    });
+    }
 
     return [5, 4, 3, 2, 1].map(star => ({
       star,
       count: counts[star as 1 | 2 | 3 | 4 | 5],
     }));
-  }, [filteredRmpReviews, filteredTraceCourses]);
+  }, [filteredRmpReviews, selectedCourses, profile?.traceRatingCounts]);
 
   const maxCount = useMemo(() => Math.max(...ratingDistribution.map(d => d.count), 1), [ratingDistribution]);
 
@@ -734,9 +637,9 @@ const Professor = () => {
 
   const groupedTrace = useMemo(() => {
     const groups: Record<string, TraceComment[]> = {};
-    const ids = new Set(filteredTraceCourses.map(c => c.termId));
+    const ids = new Set(filteredTraceCourses.map(c => c.courseId));
     traceComments.forEach(c => {
-      if (ids.has(c.termId)) {
+      if (ids.has(c.courseId)) {
         if (!groups[c.question]) groups[c.question] = [];
         groups[c.question].push(c);
       }
@@ -1004,8 +907,8 @@ const Professor = () => {
         <section className="prof-radar-section">
           <div className="prof-radar-header">
             <h2 className="prof-section-title">TRACE In-Depth Evaluation</h2>
-            {mostRecentTermData?.termTitle && (
-              <span className="prof-radar-term">{cleanTerm(mostRecentTermData.termTitle)}</span>
+            {profile?.radarTermTitle && (
+              <span className="prof-radar-term">{cleanTerm(profile.radarTermTitle)}</span>
             )}
           </div>
           <p className="prof-radar-subtitle">
@@ -1091,16 +994,16 @@ const Professor = () => {
             </ResponsiveContainer>
           </div>
           <div className="prof-radar-legend-labels">
-            {RADAR_METRICS.map(m => (
+            {([
+              { short: 'Teaching', desc: 'Overall teaching effectiveness & clear communication' },
+              { short: 'Organization', desc: 'Course materials, syllabus accuracy & time usage' },
+              { short: 'Rigor', desc: 'Intellectual challenge & how much students learned' },
+              { short: 'Grading', desc: 'Fair evaluation & quality of feedback' },
+              { short: 'Accessibility', desc: 'Office hours availability & inclusive environment' },
+            ] as const).map(m => (
               <div key={m.short} className="prof-radar-metric-info">
                 <span className="prof-radar-metric-name">{m.short}</span>
-                <span className="prof-radar-metric-desc">
-                  {m.short === 'Teaching' && 'Overall teaching effectiveness & clear communication'}
-                  {m.short === 'Organization' && 'Course materials, syllabus accuracy & time usage'}
-                  {m.short === 'Rigor' && 'Intellectual challenge & how much students learned'}
-                  {m.short === 'Grading' && 'Fair evaluation & quality of feedback'}
-                  {m.short === 'Accessibility' && 'Office hours availability & inclusive environment'}
-                </span>
+                <span className="prof-radar-metric-desc">{m.desc}</span>
               </div>
             ))}
           </div>

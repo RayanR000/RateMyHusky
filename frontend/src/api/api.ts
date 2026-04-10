@@ -22,17 +22,12 @@ export interface RandomProfessor {
 }
 
 /* ---- Professor page types ---- */
-export interface TraceCourseScore {
-  question: string;
-  mean: number;
-  completed: number;
-  totalResponses?: number;
-  count1?: number;
-  count2?: number;
-  count3?: number;
-  count4?: number;
-  count5?: number;
-  deptMean?: number;
+export interface RadarDataPoint {
+  metric: string;
+  professor: number;
+  department: number;
+  profMissing: boolean;
+  deptMissing: boolean;
 }
 
 export interface TraceCourse {
@@ -41,7 +36,18 @@ export interface TraceCourse {
   termTitle: string;
   departmentName: string;
   displayName: string;
-  scores: TraceCourseScore[];
+  hoursPerWeek?: number | null;
+  challengeWeightedSum?: number | null;
+  challengeResponses?: number | null;
+}
+
+export interface TraceRatingCounts {
+  count1: number;
+  count2: number;
+  count3: number;
+  count4: number;
+  count5: number;
+  completed: number;
 }
 
 export interface ProfessorProfile {
@@ -58,6 +64,9 @@ export interface ProfessorProfile {
   traceCourses: TraceCourse[];
   imageUrl: string | null;
   hoursPerWeek: number | null;
+  traceRatingCounts?: Record<string, TraceRatingCounts>;
+  radarData?: RadarDataPoint[] | null;
+  radarTermTitle?: string | null;
 }
 
 export interface ProfessorReviews {
@@ -100,7 +109,7 @@ async function get<T>(path: string): Promise<T> {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers });
+  const res = await fetch(`${API_BASE}${path}`, { headers, cache: token ? 'no-cache' : 'default' });
   if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
   return res.json();
 }
@@ -117,14 +126,13 @@ export const fetchRandomProfessor = () => get<RandomProfessor>("/api/random-prof
 /* ---- Professor page fetchers ---- */
 export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | null> {
   const token = localStorage.getItem('auth_token');
-  const key = `${slug}:${token ?? 'u'}`;
-  if (_profFullCache.has(key)) return _profFullCache.get(key)!;
+  const reviewsKey = `${slug}:${token ?? 'u'}`;
+  if (_profFullCache.has(reviewsKey)) return _profFullCache.get(reviewsKey)!;
   try {
     const data = await get<ProfessorFull>(`/api/professors/${encodeURIComponent(slug)}/full`);
-    _profFullCache.set(key, data);
-    // Also populate individual caches so Compare page hits don't re-fetch
-    _profCache.set(slug, data);
-    _profReviewsCache.set(key, data);
+    _profFullCache.set(reviewsKey, data);
+    _profCache.set(reviewsKey, data);
+    _profReviewsCache.set(reviewsKey, data);
     return data;
   } catch {
     return null;
@@ -132,10 +140,12 @@ export async function fetchProfessorFull(slug: string): Promise<ProfessorFull | 
 }
 
 export async function fetchProfessorData(slug: string): Promise<ProfessorProfile | null> {
-  if (_profCache.has(slug)) return _profCache.get(slug)!;
+  const token = localStorage.getItem('auth_token');
+  const key = `${slug}:${token ?? 'u'}`;
+  if (_profCache.has(key)) return _profCache.get(key)!;
   try {
     const data = await get<ProfessorProfile>(`/api/professors/${encodeURIComponent(slug)}`);
-    _profCache.set(slug, data);
+    _profCache.set(key, data);
     return data;
   } catch {
     return null;
@@ -152,21 +162,6 @@ export async function fetchProfessorReviews(slug: string): Promise<ProfessorRevi
     return data;
   } catch {
     return null;
-  }
-}
-
-export interface TraceDeptAvgItem {
-  question: string;
-  avgMean: number;
-}
-
-export async function fetchTraceDeptAvg(department: string, termId: number): Promise<TraceDeptAvgItem[]> {
-  try {
-    return await get<TraceDeptAvgItem[]>(
-      `/api/trace-dept-avg?department=${encodeURIComponent(department)}&term_id=${termId}`
-    );
-  } catch {
-    return [];
   }
 }
 
@@ -232,9 +227,7 @@ export interface CourseSummary {
   name: string;
   department: string;
   avgRating: number | null;
-  totalSections: number;
-  totalInstructors: number;
-  totalEnrollment: number;
+  avgEnrollment: number | null;
   latestTermTitle: string;
 }
 
@@ -246,6 +239,7 @@ export interface CourseInstructorBreakdown {
   wouldTakeAgainPct: number | null;
   totalReviews: number;
   totalComments: number;
+  latestTermTitle: string;
   avgRating: number | null;
   courseAvgDifficulty: number | null;
   courseAvgHoursPerWeek: number | null;
